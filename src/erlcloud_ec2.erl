@@ -1219,10 +1219,11 @@ describe_instances(Config)
 describe_instances(InstanceIDs) ->
     describe_instances(InstanceIDs, default_config()).
 
--spec(describe_instances/2 :: ([string()], aws_config()) -> proplist()).
-describe_instances(InstanceIDs, Config)
-  when is_list(InstanceIDs) ->
-    case ec2_query2(Config, "DescribeInstances", erlcloud_aws:param_list(InstanceIDs, "InstanceId")) of
+-spec(describe_instances/2 :: ([string() | tuple()], aws_config()) -> proplist()).
+describe_instances([H | _] = InstanceIDs, Config) when not is_tuple(H) ->
+    describe_instances(erlcloud_aws:param_list(InstanceIDs, "InstanceId"), Config);
+describe_instances(ParamList, Config) ->
+    case ec2_query2(Config, "DescribeInstances", ParamList, ?NEW_API_VERSION) of
         {ok, Doc} ->
             Reservations = xmerl_xpath:string("/DescribeInstancesResponse/reservationSet/item", Doc),
             {ok, [extract_reservation(Item) || Item <- Reservations]};
