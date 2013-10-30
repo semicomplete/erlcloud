@@ -2306,9 +2306,9 @@ run_instances(InstanceSpec, Config)
               {"Placement.AvailabilityZone", InstanceSpec#ec2_instance_spec.availability_zone},
               {"DisableApiTermination", InstanceSpec#ec2_instance_spec.disable_api_termination},
               {"InstanceInitiatedShutdownBehavior", InstanceSpec#ec2_instance_spec.instance_initiated_shutdown_behavior},
-              {"SecurityGroupId", InstanceSpec#ec2_instance_spec.group_set},
-              {"EbsOptimized", InstanceSpec#ec2_instance_spec.ebs_optimized}
-             ],
+              {"EbsOptimized", InstanceSpec#ec2_instance_spec.ebs_optimized} |
+              erlcloud_aws:param_list(InstanceSpec#ec2_instance_spec.group_set,
+                                      "SecurityGroupId")],
     BDParams = block_device_params(InstanceSpec#ec2_instance_spec.block_device_mapping),
     case ec2_query2(Config, "RunInstances", Params ++ BDParams, ?NEW_API_VERSION) of
         {ok, Doc} ->
