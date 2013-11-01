@@ -65,6 +65,10 @@
          describe_instance_status/1, describe_instance_status/2,
          describe_instance_status/3,
 
+         %% Interfaces
+         create_network_interface/2,
+         modify_source_dest_check/2,
+
          %% Key Pairs
          create_key_pair/1, create_key_pair/2,
          delete_key_pair/1, delete_key_pair/2,
@@ -2280,6 +2284,55 @@ revoke_security_group_ingress(GroupName, IngressSpec, Config)
     Params = [{"GroupName", GroupName}|ingress_spec_params(IngressSpec)],
     ec2_simple_query2(Config, "RevokeSecurityGroupIngress", Params).
 
+extract_network_interface(V) ->
+    R = hd(xmerl_xpath:string("/CreateNetworkInterfaceResponse", V)),
+    I = hd(xmerl_xpath:string("networkInterface", R)),
+    [{network_interface_id, get_text("networkInterfaceId", I)}].
+
+%%
+%%
+-spec(create_network_interface/2 :: (ec2_interface_spec(), 
+                                     aws_config()) -> proplist()).
+create_network_interface(InterfaceSpec, Config)
+  when is_record(InterfaceSpec, ec2_interface_spec) ->
+    Params = [{"SubnetId", InterfaceSpec#ec2_interface_spec.subnet_id} |
+              erlcloud_aws:param_list(
+                InterfaceSpec#ec2_interface_spec.group_set,
+                "SecurityGroupId")],
+    case ec2_query2(Config,
+                    "CreateNetworkInterface", 
+                    Params, 
+                    ?NEW_API_VERSION) of
+        {ok, Doc} ->
+            {ok, extract_network_interface(Doc)};
+        Error -> Error
+    end.
+
+extract_request_response(Type, V) ->
+    R = hd(xmerl_xpath:string(Type, V)),
+    [{request_id, get_text("requestId", R)},
+     {return,     get_bool("return", R)}].
+%%
+%%
+-spec(modify_source_dest_check/2 :: (ec2_interface_spec(),
+                                     aws_config()) -> proplist()).
+modify_source_dest_check(InterfaceSpec, Config)
+  when is_record(InterfaceSpec, ec2_interface_spec) ->
+    Params= [{"NetworkInterfaceId", 
+              InterfaceSpec#ec2_interface_spec.network_interface_id},
+             {"SourceDestCheck.Value", 
+              InterfaceSpec#ec2_interface_spec.source_dest_check}],
+    case ec2_query2(Config,
+                    "ModifyNetworkInterfaceAttribute", 
+                    Params,
+                    ?NEW_API_VERSION) of
+        {ok, Doc} -> 
+            {ok,  extract_request_response(
+                    "/ModifyNetworkInterfaceAttributeResponse", 
+                    Doc)};
+        Error     -> Error
+    end.
+
 %%
 %%
 -spec(run_instances/1 :: (ec2_instance_spec()) -> proplist()).
@@ -2310,9 +2363,30 @@ run_instances(InstanceSpec, Config)
               erlcloud_aws:param_list(InstanceSpec#ec2_instance_spec.group_set,
                                       "SecurityGroupId")],
     BDParams = block_device_params(InstanceSpec#ec2_instance_spec.block_device_mapping),
-    case ec2_query2(Config, "RunInstances", Params ++ BDParams, ?NEW_API_VERSION) of
+    IParams =
+        lists:foldl(
+          fun(X,A) ->
+                  erlcloud_aws:param_list(
+                    [[{"DeviceIndex",
+                       X#ec2_interface_spec.device_index},
+                      {"SubnetId",
+                       X#ec2_interface_spec.subnet_id},
+                      {"Description",
+                       X#ec2_interface_spec.description},
+                      {"DeleteOnTermination",
+                       X#ec2_interface_spec.delete_on_termination}]],
+                    "NetworkInterface") ++ A
+          end,
+          [],
+          InstanceSpec#ec2_instance_spec.network_interfaces
+         ),
+    case ec2_query2(Config,
+                    "RunInstances",
+                    Params ++ BDParams ++ IParams,
+                    ?NEW_API_VERSION) of
         {ok, Doc} ->
-            {ok, extract_reservation(hd(xmerl_xpath:string("/RunInstancesResponse", Doc)))};
+            R = xmerl_xpath:string("/RunInstancesResponse", Doc),
+            {ok, extract_reservation(hd(R))};
         {error, _} = Error ->
             Error
     end.
