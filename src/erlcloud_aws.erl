@@ -4,7 +4,7 @@
          aws_request_xml/5, aws_request_xml/6, aws_request_xml/7, aws_request_xml/8,
          aws_request2/7,
          aws_request_xml2/5, aws_request_xml2/7,
-         param_list/2, default_config/0, update_config/1, format_timestamp/1,
+         param_list/2, param_list_r/2, default_config/0, update_config/1, format_timestamp/1,
          http_headers_body/1,
          sign_v4/5]).
 
@@ -127,6 +127,58 @@ param_list([[{_, _}|_]|_] = Values, Key) ->
 param_list(Values, Key) ->
     [{lists:flatten([Key, $., integer_to_list(I)]), Value} ||
         {I, Value} <- lists:zip(lists:seq(1, length(Values)), Values)].
+
+%% This is a version of the param_list function above that uses
+%% recursion to provide a more consistent construction of parameter lists.
+%% The problem with list comprehensions is that they do not compose. Therefore
+%% the non recursive version of param_list can not build deep nested parameter
+%% lists properly. I am not sure if the _r functions provide a replacement
+%% for all the use cases of param_list.. quite frankly I found the interface
+%% confusing and inconsistent, since all I had to go with is reverse
+%% engineering.
+param_list_r(_, [], _, _) ->
+    [];
+param_list_r(Key, [{SubKey, Value} | Rest], Level, Acc) ->
+    NAcc = lists:flatten([Acc,$.,integer_to_list(Level),$.,SubKey]),
+    param_list_r(NAcc, Value, 0, NAcc) ++
+        param_list_r(Key, Rest, Level + 1, Acc);
+param_list_r(Key, [Value | Rest], Level, Acc) when is_list(Value) ->
+    NAcc = Acc ++ [$. | integer_to_list(Level)],
+    param_list_r(NAcc, Value, 0, NAcc) ++
+        param_list_r(Key, Rest, Level + 1, Acc);
+param_list_r(_, Value, _, Acc) ->
+    [{Acc, Value}].
+
+%%
+%% @doc Builds a possibly nested parameter list recursively. The 
+%% values provided to the function can be:
+%% - a single string or POD type. 
+%% - a list containing either:
+%%    - strings or POD types
+%%    - a tuple describing a sub key.. {SubKey, Values}, where Values
+%%      can once more be a string or POD type or a composite list of values
+%%      and so on, and so on.
+%% So for example:
+%% param_list_r("int", "foo") ->
+%%     [{"int","foo"}].
+%%
+%% param_list_r("int", ["foo", "bar"]) ->
+%%     [{"int.0","foo"},{"int.1","bar"}].
+%% param_list_r("foo", [{"name", "bar"}, {"name", "baz"}]) ->
+%%     [{"foo.0.name","fooname"},{"foo.1.bars", "baz"}].
+%% param_list_r("int", [{"foo", [{"bar", "baz"}, {"bang", "pang"}]}]) ->
+%%     [{"int.0.foo.0.bar","baz"},{"int.0.foo.1.bang","pang"}].
+%%
+%% I believe one can build almost anything with this scheme, even things that
+%% are likely invalid parameters in the AWS API. For example:
+%% param_list_r("foo", [["bar", "baz"]]) ->
+%%     [{"foo.0.0","bar"},{"foo.0.1","baz"}]
+%% so when recursing levels you probably always want to specify a sub key
+%% via a tuple. Unless this is truly what you want. I think this scheme 
+%% composes well to increase flexibility for current and future versions of the
+%% API - EG
+param_list_r(Key, Values) ->
+    param_list_r(Key, Values, 0, Key).
 
 value_to_string(Integer) when is_integer(Integer) -> integer_to_list(Integer);
 value_to_string(Atom) when is_atom(Atom) -> atom_to_list(Atom);
