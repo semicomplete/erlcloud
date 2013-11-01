@@ -16,6 +16,7 @@
           max_count=1::pos_integer(),
           key_name::string(),
           group_set=["default"]::[string()],
+          network_interfaces=[]::[ec2_interface_spec()],
           user_data::binary(),
           instance_type::string(),
           availability_zone::string(),
@@ -78,9 +79,19 @@
           port_range_from::integer(),
           port_range_to::integer()
          }).
+-record(ec2_interface_spec, {
+          network_interface_id::string(),
+          description="none"::string(),
+          device_index::number(),
+          subnet_id::string(),
+          group_set=["default"]::[string()],
+          source_dest_check=true::boolean(),
+          delete_on_termination=true::boolean()
+         }).
 
 -type(ec2_image_spec() :: #ec2_image_spec{}).
 -type(ec2_instance_spec() :: #ec2_instance_spec{}).
+-type(ec2_interface_spec() :: #ec2_interface_spec{}).
 -type(ec2_ingress_spec() :: #ec2_ingress_spec{}).
 -type(ec2_spot_instance_request() :: #ec2_spot_instance_request{}).
 -type(vpc_ingress_spec() :: #vpc_ingress_spec{}).
