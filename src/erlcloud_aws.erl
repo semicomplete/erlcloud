@@ -3,7 +3,7 @@
          aws_request_xml/5, aws_request_xml/6, aws_request_xml/7, aws_request_xml/8,
          aws_request2/7,
          aws_request_xml2/5, aws_request_xml2/7,
-         param_list/2, param_list_r/2, 
+         param_list/2, param_list_r/1, param_list_r/2, 
          default_config/0, update_config/1, format_timestamp/1,
          http_headers_body/1]).
 
@@ -138,13 +138,15 @@ param_list(Values, Key) ->
 param_list_r(_, [], _, _) ->
     [];
 param_list_r(Key, [{SubKey, Value} | Rest], Level, Acc) ->
-    NAcc = lists:flatten([Acc,$.,integer_to_list(Level),$.,SubKey]),
+    NAcc = lists:flatten([Acc,$.,SubKey]),
     param_list_r(NAcc, Value, 0, NAcc) ++
         param_list_r(Key, Rest, Level + 1, Acc);
 param_list_r(Key, [Value | Rest], Level, Acc) when is_list(Value) ->
     NAcc = Acc ++ [$. | integer_to_list(Level)],
     param_list_r(NAcc, Value, 0, NAcc) ++
         param_list_r(Key, Rest, Level + 1, Acc);
+param_list_r(_, undefined, _, _) ->
+    [];
 param_list_r(_, Value, _, Acc) ->
     [{Acc, Value}].
 
@@ -176,6 +178,16 @@ param_list_r(_, Value, _, Acc) ->
 %% via a tuple. Unless this is truly what you want. I think this scheme 
 %% composes well to increase flexibility for current and future versions of the
 %% API - EG
+%% param_list_r/1 is provided to facilitate building long lists.. this way
+%% it is possible to provide all key value(s) pairs as elements of a single
+%% list
+param_list_r(KVs) ->
+    lists:foldl(
+      fun({K, V}, A) ->
+              param_list_r(K,V) ++ A
+      end,
+      [],
+      KVs).
 param_list_r(Key, Values) ->
     param_list_r(Key, Values, 0, Key).
 
