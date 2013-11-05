@@ -66,6 +66,7 @@
          describe_instance_status/3,
 
          %% Interfaces
+         encode_network_interface/1, encode_network_interfaces/1,
          create_network_interface/2,
          modify_source_dest_check/2,
 
@@ -2335,54 +2336,59 @@ modify_source_dest_check(InterfaceSpec, Config)
 
 %%
 %%
+encode_network_interfaces(Instance) ->
+    lists:map(fun encode_network_interface/1,
+              Instance#ec2_instance_spec.network_interfaces).
+%%
+encode_network_interface(Interface) ->
+    [{"NetworkInterfaceId", Interface#ec2_interface_spec.network_interface_id},
+     {"DeviceIndex",        Interface#ec2_interface_spec.device_index},
+     {"SubnetId",           Interface#ec2_interface_spec.subnet_id},
+     {"Description",        Interface#ec2_interface_spec.description},
+     {"PrivateIpAddress",   Interface#ec2_interface_spec.private_ip_address},
+     {"SecurityGroupId",    Interface#ec2_interface_spec.group_set},
+     {"AssociatePublicIpAddress",
+      Interface#ec2_interface_spec.public_ip_address_associated}].
+
+%%
+%%
 -spec(run_instances/1 :: (ec2_instance_spec()) -> proplist()).
 run_instances(InstanceSpec) -> run_instances(InstanceSpec, default_config()).
 
 -spec(run_instances/2 :: (ec2_instance_spec(), aws_config()) -> proplist()).
 run_instances(InstanceSpec, Config)
   when is_record(InstanceSpec, ec2_instance_spec) ->
-    Params = [
-              {"ImageId", InstanceSpec#ec2_instance_spec.image_id},
-              {"MaxCount", InstanceSpec#ec2_instance_spec.max_count},
-              {"MinCount", InstanceSpec#ec2_instance_spec.min_count},
-              {"KeyName", InstanceSpec#ec2_instance_spec.key_name},
-              {"UserData",
-               case InstanceSpec#ec2_instance_spec.user_data of
-                   undefined -> undefined;
-                   Data -> base64:encode(Data)
-               end},
-              {"InstanceType", InstanceSpec#ec2_instance_spec.instance_type},
-              {"KernelId", InstanceSpec#ec2_instance_spec.kernel_id},
-              {"RamdiskId", InstanceSpec#ec2_instance_spec.ramdisk_id},
-              {"Monitoring.Enabled", InstanceSpec#ec2_instance_spec.monitoring_enabled},
-              {"SubnetId", InstanceSpec#ec2_instance_spec.subnet_id},
-              {"Placement.AvailabilityZone", InstanceSpec#ec2_instance_spec.availability_zone},
-              {"DisableApiTermination", InstanceSpec#ec2_instance_spec.disable_api_termination},
-              {"InstanceInitiatedShutdownBehavior", InstanceSpec#ec2_instance_spec.instance_initiated_shutdown_behavior},
-              {"EbsOptimized", InstanceSpec#ec2_instance_spec.ebs_optimized} |
-              erlcloud_aws:param_list(InstanceSpec#ec2_instance_spec.group_set,
-                                      "SecurityGroupId")],
-    BDParams = block_device_params(InstanceSpec#ec2_instance_spec.block_device_mapping),
-    IParams =
-        lists:foldl(
-          fun(X,A) ->
-                  erlcloud_aws:param_list(
-                    [[{"DeviceIndex",
-                       X#ec2_interface_spec.device_index},
-                      {"SubnetId",
-                       X#ec2_interface_spec.subnet_id},
-                      {"Description",
-                       X#ec2_interface_spec.description},
-                      {"DeleteOnTermination",
-                       X#ec2_interface_spec.delete_on_termination}]],
-                    "NetworkInterface") ++ A
-          end,
-          [],
-          InstanceSpec#ec2_instance_spec.network_interfaces
-         ),
+    Params = 
+        erlcloud_aws:param_list_r(
+          [{"ImageId", InstanceSpec#ec2_instance_spec.image_id},
+           {"MaxCount", InstanceSpec#ec2_instance_spec.max_count},
+           {"MinCount", InstanceSpec#ec2_instance_spec.min_count},
+           {"KeyName", InstanceSpec#ec2_instance_spec.key_name},
+           {"UserData",
+            case InstanceSpec#ec2_instance_spec.user_data of
+                undefined -> undefined;
+                Data -> base64:encode(Data)
+            end},
+           {"InstanceType", InstanceSpec#ec2_instance_spec.instance_type},
+           {"KernelId", InstanceSpec#ec2_instance_spec.kernel_id},
+           {"RamdiskId", InstanceSpec#ec2_instance_spec.ramdisk_id},
+           {"Monitoring.Enabled", 
+            InstanceSpec#ec2_instance_spec.monitoring_enabled},
+           {"SubnetId", InstanceSpec#ec2_instance_spec.subnet_id},
+           {"Placement.AvailabilityZone",
+            InstanceSpec#ec2_instance_spec.availability_zone},
+           {"DisableApiTermination", 
+            InstanceSpec#ec2_instance_spec.disable_api_termination},
+           {"InstanceInitiatedShutdownBehavior", 
+            InstanceSpec#ec2_instance_spec.instance_initiated_shutdown_behavior},
+           {"EbsOptimized", InstanceSpec#ec2_instance_spec.ebs_optimized},
+           {"SecurityGroupId", InstanceSpec#ec2_instance_spec.group_set},
+           {"NetworkInterface", encode_network_interfaces(InstanceSpec)}]),
+    BDParams = 
+        block_device_params(InstanceSpec#ec2_instance_spec.block_device_mapping),
     case ec2_query2(Config,
                     "RunInstances",
-                    Params ++ BDParams ++ IParams,
+                    Params ++ BDParams,
                     ?NEW_API_VERSION) of
         {ok, Doc} ->
             R = xmerl_xpath:string("/RunInstancesResponse", Doc),

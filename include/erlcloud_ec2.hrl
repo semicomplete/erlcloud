@@ -81,12 +81,14 @@
          }).
 -record(ec2_interface_spec, {
           network_interface_id::string(),
-          description="none"::string(),
+          description::string(),
           device_index::number(),
           subnet_id::string(),
           group_set=["default"]::[string()],
-          source_dest_check=true::boolean(),
-          delete_on_termination=true::boolean()
+          source_dest_check::boolean(),
+          public_ip_address_associated::boolean(),
+          private_ip_address::string(),
+          delete_on_termination::boolean()
          }).
 
 -type(ec2_image_spec() :: #ec2_image_spec{}).
