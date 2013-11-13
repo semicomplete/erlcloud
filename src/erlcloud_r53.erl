@@ -4,6 +4,10 @@
 %%
 -module(erlcloud_r53).
 -export([change_record_sets/3]).
+-export([create_hosted_zone/3, create_hosted_zone/4]).
+-export([delete_hosted_zone/2]).
+-export([get_hosted_zone/2]).
+-export([list_hosted_zones/1]).
 -include_lib("xmerl/include/xmerl.hrl").
 -include_lib("erlcloud/include/erlcloud.hrl").
 -include_lib("erlcloud/include/erlcloud_aws.hrl").
@@ -41,31 +45,151 @@ encode_changes(Actions) ->
       Actions).
 
 %% @doc
+%% Creates a new Hosted Zone
+-spec(create_hosted_zone(string(), string(), aws_config()) -> 
+             {ok, proplist()} | {error, any()}).
+create_hosted_zone(Name, Reference, Config) ->
+    create_hosted_zone(Name, Reference, "", Config).
+-spec(create_hosted_zone(string(), string(), string(), aws_config()) -> 
+             {ok, proplist()} | {error, any()}).
+create_hosted_zone(Name, Reference, Comment, Config) ->
+    Tag         = 'CreateHostedZoneRequest',
+    Path        = "/hostedzone",
+    Request     = [{'Name', [Name]},
+                   {'CallerReference', [Reference]},
+                   {'HostedZoneConfig', 
+                    [{'Comment', [Comment]}]}],
+    ResponseTag = "CreateHostedZoneResponse",
+    case r53_send_request(post, Tag, Path, Request, ResponseTag, Config) of
+        {ok, _Node, Response} ->
+            {ok, Response};
+        Error -> Error
+    end.
+
+%% @doc
+%% Deletes a Hosted Zone
+-spec(delete_hosted_zone(string(), aws_config()) ->
+             {ok, proplist()} | {error, any()}).
+delete_hosted_zone(Name, Config) ->
+    Path        = "/hostedzone/" ++ Name,
+    ResponseTag = "DeleteHostedZoneResponse",
+    r53_send_request(delete, Path, ResponseTag, Config).
+
+%% @doc
 %% Batches a DNS record set change request
 -spec(change_record_sets(string(), {string(), r53_record_set()}, aws_config())
       -> {ok, proplist()} | {error, any()}).
-change_record_sets(HostedZone, Actions, Conf) ->
-    Host = Conf#aws_config.r53_host,
-    Request = 
-        [{'ChangeResourceRecordSetsRequest',
-          [{xmlns, "https://" ++ Host ++ "/doc/" ++ ?API_VERSION ++ "/"}],
-          [{'ChangeBatch',
-            [{'Changes', encode_changes(Actions)}]}]}],
-    XML = iolist_to_binary(xmerl:export_simple(Request, xmerl_xml)),
-    R = r53_request(post, "/hostedzone/" ++ HostedZone ++ "/rrset", XML, Conf),
-    case R of
-        {ok, Response} ->
-            Node = 
-                hd(xmerl_xpath:string(
-                     "/ChangeResourceRecordSetsResponse/ChangeInfo", Response)),
-            {ok,
-             [{change_id, erlcloud_xml:get_text("Id", Node)},
-              {status,    erlcloud_xml:get_text("Status", Node)},
-              {submitted, erlcloud_xml:get_text("SubmittedAt", Node)}]};
+change_record_sets(HostedZone, Actions, Config) ->
+    Tag         = 'ChangeResourceRecordSetsRequest',
+    Path        = "/hostedzone/" ++ HostedZone ++ "/rrset",
+    Request     = [{'ChangeBatch',
+                    [{'Changes', encode_changes(Actions)}]}],
+    ResponseTag = "ChangeResourceRecordSetsResponse",
+    case r53_send_request(post, Tag, Path, Request, ResponseTag, Config) of
+        {ok, _Node, Response} ->
+            {ok, Response};
         Error -> Error
     end.
 
 %% @private
+extract_hosted_zone(Node0) ->
+    Node = hd(xmerl_xpath:string("/HostedZone", Node0)),
+    [{id,           erlcloud_xml:get_text("Id",                        Node)},
+     {name,         erlcloud_xml:get_text("Name",                      Node)},
+     {comment,      erlcloud_xml:get_text("Config/Comment",            Node)},
+     {record_count, erlcloud_xml:get_integer("ResourceRecordSetCount", Node)}].
+
+%% @private
+extract_hosted_zones(Node) ->
+    Zones = xmerl_xpath:string("/HostedZones/*", Node),
+    [{hosted_zones, lists:map(fun extract_hosted_zone/1,    Zones)},
+     {marker,       erlcloud_xml:get_text("Marker",         Node)},
+     {is_truncated, erlcloud_xml:get_bool("IsTruncated",    Node)},
+     {next_marker,  erlcloud_xml:get_text("NextMarker",     Node)},
+     {max_items,    erlcloud_xml:get_integer("MaxItems",    Node)}].
+
+%% @private
+extract_delegation_set(Node) ->
+    NSNodes =
+        lists:foldl(
+          fun(N, A) ->
+                  [erlcloud_xml:get_text("/NameServer", N) | A] 
+          end,
+          [],
+          xmerl_xpath:string("/DelegationSet/NameServers/*", Node)),
+    [{nameservers, NSNodes}].
+
+%% @private
+extract_change_info(Node) ->
+    [{change_id, erlcloud_xml:get_text("Id", Node)},
+     {status,    erlcloud_xml:get_text("Status", Node)},
+     {submitted, erlcloud_xml:get_text("SubmittedAt", Node)}].
+
+%% @doc
+%% Get information pertaining to a specific hosted zone
+-spec(get_hosted_zone(string(), aws_config()) -> 
+             {ok, proplist()} | {error, any()}).
+get_hosted_zone(Name, Config) ->
+    Path        = "/hostedzone/" ++ Name,
+    ResponseTag = "GetHostedZoneResponse",
+    case r53_send_request(get, Path, ResponseTag, Config) of
+        {ok, Node} ->
+            Zone = hd(xmerl_xpath:string("HostedZone", Node)),
+            DS   = hd(xmerl_xpath:string("DelegationSet", Node)),
+            {ok, 
+             [{hosted_zone,    extract_hosted_zone(Zone)},
+              {delegation_set, extract_delegation_set(DS)}]};
+        Error -> Error
+    end.
+
+%% @doc
+%% List all hosted zones
+-spec(list_hosted_zones(aws_config()) 
+      -> {ok, proplist()} | {error, any()}).
+list_hosted_zones(Config) ->
+    Path        = "/hostedzone",
+    ResponseTag = "ListHostedZonesResponse",
+    case r53_send_request(get, Path, ResponseTag, Config) of
+        {ok, Node} ->
+            Zones = hd(xmerl_xpath:string("HostedZones", Node)),
+            {ok, extract_hosted_zones(Zones)};
+        Error -> Error
+    end.
+%% @private
+r53_send_request(Method, RequestTag, Path, Request, ResponseTag, Config) 
+  when is_atom(RequestTag) and is_list(ResponseTag) ->
+    Host = Config#aws_config.r53_host,
+    R = [{RequestTag, 
+          [{xmlns, "https://" ++ Host ++ "/doc/" ++ ?API_VERSION ++ "/"}],
+          Request}],
+    XML = iolist_to_binary(xmerl:export_simple(R, xmerl_xml)),
+    case r53_request(Method, Path, XML, Config) of
+        {ok, Response} ->
+            Node   = hd(xmerl_xpath:string([$/ | ResponseTag], Response)),
+            CINode = hd(xmerl_xpath:string("ChangeInfo", Node)),
+            {ok, Node, extract_change_info(CINode)};
+        Error -> Error
+    end.
+
+%% @private
+r53_send_request(Method, Path, ResponseTag, Config) ->
+         case r53_request(Method, Path, Config) of
+             {ok, Response} ->
+                 XPath = [$/ | ResponseTag],
+                 Node = hd(xmerl_xpath:string(XPath, Response)),
+                 case Method of 
+                     get -> {ok, Node};
+                     delete ->
+                         CINode = hd(xmerl_xpath:string("ChangeInfo", Node)),
+                         {ok, extract_change_info(CINode)}
+                 end;
+             Error -> Error
+         end.
+
+%% @private
+r53_request(Method, Path, Config) ->
+    URI = uri(Path, Config),
+    send_request(Method, URI, auth_headers(Config)).
 r53_request(Method, Path, Body, Config) ->
     r53_request(Method, Path, "application/xml", Body, Config).
 %% @private
