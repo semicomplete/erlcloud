@@ -7,7 +7,9 @@
 -export([create_hosted_zone/3, create_hosted_zone/4]).
 -export([delete_hosted_zone/2]).
 -export([get_hosted_zone/2]).
+-export([get_record_set/3, get_record_set/4]).
 -export([list_hosted_zones/1]).
+-export([list_record_sets/3, list_record_sets/4, list_record_sets/6]).
 -include_lib("xmerl/include/xmerl.hrl").
 -include_lib("erlcloud/include/erlcloud.hrl").
 -include_lib("erlcloud/include/erlcloud_aws.hrl").
@@ -125,6 +127,31 @@ extract_change_info(Node) ->
      {status,    erlcloud_xml:get_text("Status", Node)},
      {submitted, erlcloud_xml:get_text("SubmittedAt", Node)}].
 
+%% @private
+extract_record(Node) ->
+    Values = xmerl_xpath:string("ResourceRecord/*", Node),
+    lists:map(fun(V) -> erlcloud_xml:get_text("/Value", V) end, Values).
+    
+%% @private
+extract_record_set(Node0) ->
+    Node    = hd(xmerl_xpath:string("/ResourceRecordSet", Node0)),
+    Records = xmerl_xpath:string("ResourceRecords", Node),
+    [{name, erlcloud_xml:get_text("Name", Node)},
+     {type, erlcloud_xml:get_text("Type", Node)},
+     {ttl,  erlcloud_xml:get_text("TTL",  Node)},
+     {records, lists:map(fun extract_record/1, Records)},
+     {health_check_id, erlcloud_xml:get_text("HealthCheckId", Node)}].
+
+%% @private
+extract_record_sets(Node) ->
+    Records = xmerl_xpath:string("ResourceRecordSets/*", Node),
+    [{record_sets,      lists:map(fun extract_record_set/1, Records)},
+     {is_truncated,     erlcloud_xml:get_bool("IsTruncated",          Node)},
+     {max_items,        erlcloud_xml:get_integer("MaxItems",          Node)},
+     {next_record_name, erlcloud_xml:get_text("NextRecordName",       Node)},
+     {next_record_type, erlcloud_xml:get_text("NextRecordType",       Node)},
+     {next_record_id,   erlcloud_xml:get_text("NextRecordIdentifier", Node)}].
+
 %% @doc
 %% Get information pertaining to a specific hosted zone
 -spec(get_hosted_zone(string(), aws_config()) -> 
@@ -139,6 +166,53 @@ get_hosted_zone(Name, Config) ->
             {ok, 
              [{hosted_zone,    extract_hosted_zone(Zone)},
               {delegation_set, extract_delegation_set(DS)}]};
+        Error -> Error
+    end.
+
+%% @doc
+%% Retrieves a specific record set
+-spec(get_record_set(string(), string(), string(), aws_config()) ->
+             {ok, proplist()} | {error, any()}).
+get_record_set(HostedZone, Name, Type, Config) ->
+    list_record_sets(HostedZone, Name, Type, undefined, 1, Config).
+
+%% @doc
+%% Retrieve a list of all record sets of given name
+-spec(get_record_set(string(), string(), aws_config()) ->
+ {ok, proplist()} | {error, any()}).
+get_record_set(HostedZone, Name, Config) ->
+    get_record_set(HostedZone, Name, undefined, Config).
+
+%% @doc
+%% Retrieve a list of record sets for the given name
+-spec(list_record_sets(string(), string(), aws_config()) -> 
+             {ok, proplist()} | {error, any()}).
+list_record_sets(HostedZone, Name, Config) ->
+    list_record_sets(HostedZone, Name, undefined, undefined, undefined, Config).
+
+%% @doc
+%% Retrieve a list of record sets for the given name and type
+-spec(list_record_sets(string(), string(), string(), aws_config()) -> 
+             {ok, proplist()} | {error, any()}).
+list_record_sets(HostedZone, Start, Type, Config) ->
+    list_record_sets(HostedZone, Start, Type, undefined, undefined, Config).
+
+%% @doc
+%% Retrieve a list of N record sets starting from the specified entry
+-spec(list_record_sets(string(), string(), string(), string(), number(), 
+                       aws_config()) -> {ok, proplist()} | {error, any()}).
+list_record_sets(HostedZone, Start, Type, SetIdentifier, Count, Config) ->
+    Path        = "/hostedzone/" ++ HostedZone ++ "/rrset",
+    Params      = erlcloud_aws:param_list_r([{"name",       Start},
+                                             {"type",       Type},
+                                             {"identifier", SetIdentifier},
+                                             {"maxitems",   Count}]),
+    Query       = erlcloud_http:make_query_string(Params),
+    URI         = Path ++ [$? | Query],
+    ResponseTag = "ListResourceRecordSetsResponse",
+    case r53_send_request(get, URI, ResponseTag, Config) of
+        {ok, Node} ->
+            {ok, extract_record_sets(Node)};
         Error -> Error
     end.
 
