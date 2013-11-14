@@ -37,7 +37,7 @@ encode_record_set(RecordSet) ->
 
 %% @private
 encode_changes(Actions) ->
-    lists:foldl(
+    lists:foldr(
       fun ({Action, RecordSet}, A) ->
               [{'Change', 
                 [{'Action', [Action]} |
@@ -135,11 +135,11 @@ extract_record(Node) ->
 %% @private
 extract_record_set(Node0) ->
     Node    = hd(xmerl_xpath:string("/ResourceRecordSet", Node0)),
-    Records = xmerl_xpath:string("ResourceRecords", Node),
-    [{name, erlcloud_xml:get_text("Name", Node)},
-     {type, erlcloud_xml:get_text("Type", Node)},
-     {ttl,  erlcloud_xml:get_text("TTL",  Node)},
-     {records, lists:map(fun extract_record/1, Records)},
+    Records = hd(xmerl_xpath:string("ResourceRecords", Node)),
+    [{name,            erlcloud_xml:get_text("Name", Node)},
+     {type,            erlcloud_xml:get_text("Type", Node)},
+     {ttl,             erlcloud_xml:get_text("TTL",  Node)},
+     {records,         extract_record(Records)},
      {health_check_id, erlcloud_xml:get_text("HealthCheckId", Node)}].
 
 %% @private
@@ -170,21 +170,37 @@ get_hosted_zone(Name, Config) ->
     end.
 
 %% @doc
-%% Retrieves a specific record set
+%% Retrieves the first record set found with the given name and type
 -spec(get_record_set(string(), string(), string(), aws_config()) ->
              {ok, proplist()} | {error, any()}).
-get_record_set(HostedZone, Name, Type, Config) ->
-    list_record_sets(HostedZone, Name, Type, undefined, 1, Config).
+get_record_set(HostedZone, Name0, Type, Config) ->
+    Name = maybe_append_dot(Name0),
+    case list_record_sets(HostedZone, Name, Type, undefined, 1, Config) of
+        {ok, [{record_sets, []}   | _]} -> {ok, []};
+        {ok, [{record_sets, [RS]} | _]} ->
+            RName = proplists:get_value(name, RS),
+            {ok, 
+             if RName == Name ->
+                     SameType =
+                         (Type == undefined ) or 
+                         (Type == proplists:get_value(type, RS)),
+                     if SameType -> RS;
+                        true -> []
+                     end;
+                true -> []
+             end};
+        Error -> Error
+    end.
 
 %% @doc
-%% Retrieve a list of all record sets of given name
+%% Retrieve a first record set found with the given name
 -spec(get_record_set(string(), string(), aws_config()) ->
  {ok, proplist()} | {error, any()}).
 get_record_set(HostedZone, Name, Config) ->
     get_record_set(HostedZone, Name, undefined, Config).
 
 %% @doc
-%% Retrieve a list of record sets for the given name
+%% Retrieve a list of ALL record sets for the given name
 -spec(list_record_sets(string(), string(), aws_config()) -> 
              {ok, proplist()} | {error, any()}).
 list_record_sets(HostedZone, Name, Config) ->
@@ -197,13 +213,21 @@ list_record_sets(HostedZone, Name, Config) ->
 list_record_sets(HostedZone, Start, Type, Config) ->
     list_record_sets(HostedZone, Start, Type, undefined, undefined, Config).
 
+%% @private
+maybe_append_dot(Name) ->
+    [L | RName ] = lists:reverse(Name),
+    if L /= $. -> lists:reverse([$. | [L | RName]]);
+       true -> Name
+    end.
+            
 %% @doc
 %% Retrieve a list of N record sets starting from the specified entry
 -spec(list_record_sets(string(), string(), string(), string(), number(), 
                        aws_config()) -> {ok, proplist()} | {error, any()}).
 list_record_sets(HostedZone, Start, Type, SetIdentifier, Count, Config) ->
+    StartFQDN   = maybe_append_dot(Start),
     Path        = "/hostedzone/" ++ HostedZone ++ "/rrset",
-    Params      = erlcloud_aws:param_list_r([{"name",       Start},
+    Params      = erlcloud_aws:param_list_r([{"name",       StartFQDN},
                                              {"type",       Type},
                                              {"identifier", SetIdentifier},
                                              {"maxitems",   Count}]),
