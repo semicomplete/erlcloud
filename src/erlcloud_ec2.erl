@@ -154,7 +154,7 @@
 -import(erlcloud_xml, [get_text/1, get_text/2, get_text/3, get_bool/2, get_list/2, get_integer/2]).
 
 -define(API_VERSION, "2009-11-30").
--define(NEW_API_VERSION, "2012-10-01").
+-define(NEW_API_VERSION, "2013-10-15").
 -include_lib("erlcloud/include/erlcloud.hrl").
 -include_lib("erlcloud/include/erlcloud_aws.hrl").
 -include_lib("erlcloud/include/erlcloud_ec2.hrl").
