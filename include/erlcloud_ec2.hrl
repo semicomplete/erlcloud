@@ -15,7 +15,7 @@
           min_count=1::pos_integer(),
           max_count=1::pos_integer(),
           key_name::string(),
-          group_set=["default"]::[string()],
+          group_set::[string()],
           network_interfaces=[]::[ec2_interface_spec()],
           user_data::binary(),
           instance_type::string(),
