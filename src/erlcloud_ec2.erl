@@ -2634,8 +2634,16 @@ ec2_query2(Config, Action, Params) ->
 
 ec2_query2(Config, Action, Params, ApiVersion) ->
     QParams = [{"Action", Action}, {"Version", ApiVersion}|Params],
-    erlcloud_aws:aws_request_xml2(post, Config#aws_config.ec2_host,
-                                  "/", QParams, Config).
+    EC2Host = Config#aws_config.ec2_host,
+    Region  = case string:tokens(EC2Host, ".") of
+                  [_, Value, _, _] ->
+                      Value;
+                  _ ->
+                      "eu-central-1"
+              end,
+    Headers  = [{"host", EC2Host}],
+    erlcloud_aws:request(post, "ec2", Region, EC2Host, "/", Headers, QParams,
+                         Config).
 
 default_config() -> erlcloud_aws:default_config().
 

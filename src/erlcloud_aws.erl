@@ -5,6 +5,7 @@
          aws_request2/7,
          aws_request_xml2/5, aws_request_xml2/7,
          param_list/2, param_list_r/1, param_list_r/2,
+         request/8,
          default_config/0, update_config/1, format_timestamp/1,
          http_headers_body/1,
          sign_v4/5]).
@@ -111,6 +112,24 @@ aws_request2_no_update(Method, Protocol, Host, Port, Path, Params, #aws_config{}
     
     http_body(Response).
 
+request(post, Service, Region, EC2Host, Path, Headers0, QParams, Config) ->
+    Body     = erlcloud_http:make_query_string(QParams),
+    Headers  = sign_v4(Config, Headers0, Body, Region, Service),
+    URL      = lists:flatten(["https://", EC2Host, Path]),
+    Response = 
+        httpc:request(post, {URL,
+                             Headers,
+                             "application/x-www-form-urlencoded; charset=utf-8",
+                             lists:flatten(Body)},
+                      [{timeout, Config#aws_config.timeout}], 
+                      []),
+    case http_body(Response) of
+        {ok, ResponseBody } ->
+            {ok, element(1, xmerl_scan:string(ResponseBody))};
+        Error ->
+            Error
+    end.
+    
 param_list([], _Key) -> [];
 param_list(Values, Key) when is_tuple(Key) ->
     Seq = lists:seq(1, size(Key)),
